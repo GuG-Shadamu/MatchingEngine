@@ -11,4 +11,7 @@ add_executable(clion_matching_engine main.cpp
         MatchingEngine.hpp
         OrderBook.cpp
         OrderBook.hpp
-        OrderFactory.hpp)
+        OrderFactory.hpp
+        OrderFactory.cpp
+        SkipListNode.cpp
+        SkipListNode.hpp)

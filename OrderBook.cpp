@@ -2,106 +2,126 @@
  * @Author: Tairan Gao
  * @Date:   2023-08-31 11:28:00
  * @Last Modified by:   Tairan Gao
- * @Last Modified time: 2023-09-01 17:16:50
+ * @Last Modified time: 2023-09-05 02:22:56
  */
 
 #include <iostream>
 #include <string>
-#include <memory>
 
 #include "OrderBook.hpp"
 #include "SkipList.hpp"
+#include "OrderFactory.hpp"
 
 // Implementation of OrderBook
 
-void OrderBook::cancelOrder(const std::string &order_id)
+void OrderBook::cancelOrder(const Order &order)
 {
 
-    OrderPtr order = OrderFactory::getOrderById(order_id);
-    OrderSide side = order->getSide();
+    OrderSide side = order.getSide();
 
     if (side == OrderSide::Buy)
     {
-        buy_book_.remove_order(order);
+        buy_book_.removeOrder(order);
     }
     else
     {
-        sell_book_.remove_order(order);
+        sell_book_.removeOrder(order);
     }
     // remove from overall map
-    OrderFactory::removeOrder(order_id);
+    OrderFactory::removeOrder(order);
 }
 
-void OrderBook::addOrder(OrderPtr order)
+void OrderBook::addOrder(Order *order)
 {
-    matchNewOrder(order);
-    unsigned int quantity = order->getQuantity();
-    if (quantity == 0)
+    if (!matchNewOrder(order))
     {
+        OrderFactory::removeOrder(*order);
         return;
     }
 
-    OrderFactory::addOrder(order);
     if (order->getSide() == OrderSide::Buy)
     {
-        buy_book_.insert_order(order);
+        buy_book_.insertOrder(order);
     }
     else
     {
-        sell_book_.insert_order(order);
+        sell_book_.insertOrder(order);
     }
 }
 
-void OrderBook::matchNewOrder(OrderPtr &order)
+void OrderBook::settleTrades(Order *order, const std::vector<Order *> &orders_to_remove, Order *order_to_modify, std::size_t &trade_quantity)
+{
+
+    for (const auto &counter_order : orders_to_remove)
+    {
+        SkipList &counter_party = order->getSide() == OrderSide::Buy ? sell_book_ : buy_book_;
+        printTrade(*counter_order, *order, counter_order->getQuantity());
+        counter_party.removeOrder(*counter_order);
+        OrderFactory::removeOrder(*counter_order);
+    }
+    if (order_to_modify != nullptr)
+    {
+        printTrade(*order_to_modify, *order, trade_quantity);
+        order_to_modify->setQuantity(order_to_modify->getQuantity() - trade_quantity);
+    }
+}
+
+bool OrderBook::matchNewOrder(Order *order)
 {
     int price = order->getPrice();
-    unsigned int quantity = order->getQuantity();
+    std::size_t quantity = order->getQuantity();
+    OrderType type = order->getType();
+
+    std::size_t counter_order_quantity;
+    std::size_t last_trade_quantity;
+    std::vector<Order *> orders_to_remove;
+    Order *order_to_modify = nullptr;
+
     bool isBuy = (order->getSide() == OrderSide::Buy);
     SkipList &counter_party = isBuy ? sell_book_ : buy_book_;
+    SkipListNode *node = counter_party.front();
 
-    while (!counter_party.empty())
+    while (node != nullptr)
     {
-        OrderPtr top_counter_order = counter_party.get_top_order();
-        int best_price = top_counter_order->getPrice();
-
         if (quantity == 0)
             break;
-
-        if ((isBuy && best_price > price) || (!isBuy && best_price < price))
+        int counter_order_price = node->getPrice();
+        if ((isBuy && counter_order_price > price) || (!isBuy && counter_order_price < price))
             break;
 
-        unsigned int counter_order_quantity = top_counter_order->getQuantity();
-        unsigned int trade_quantity = std::min(quantity, counter_order_quantity);
-
-        quantity -= trade_quantity;
-        counter_order_quantity -= trade_quantity;
-
-        printTrade(top_counter_order, order, trade_quantity);
-        if (counter_order_quantity > 0)
+        for (const auto &counter_order : node->getList())
         {
-            top_counter_order->setQuantity(counter_order_quantity);
+            counter_order_quantity = counter_order->getQuantity();
+            if (counter_order_quantity <= quantity)
+            {
+                orders_to_remove.push_back(counter_order);
+                quantity -= counter_order_quantity;
+            }
+            else
+            {
+                last_trade_quantity = quantity;
+                order_to_modify = counter_order;
+                quantity = 0;
+                break;
+            }
         }
-        else
-        {
-            counter_party.pop_top_order();
-            OrderFactory::removeOrder(top_counter_order->getOrderId());
-        }
+        node = node->next();
     }
-    order->setQuantity(quantity);
-}
 
-void OrderBook::modifyOrder(const std::string &order_id, OrderSide new_side, int new_price, int new_quantity)
-{
-
-    OrderPtr order_to_modify = OrderFactory::getOrderById(order_id);
-    if (order_to_modify->getType() == OrderType::IOC)
+    if (type == OrderType::GFD)
     {
-        return;
+        settleTrades(order, orders_to_remove, order_to_modify, last_trade_quantity);
+        return quantity != 0;
     }
-    cancelOrder(order_to_modify->getOrderId());
 
-    OrderPtr new_order = OrderFactory::createOrder(order_id, new_price, new_quantity, new_side, OrderType::GFD);
-    addOrder(new_order);
+    else // type == IOC
+    {
+        if (quantity == 0)
+        {
+            settleTrades(order, orders_to_remove, order_to_modify, last_trade_quantity);
+        }
+        return false;
+    }
 }
 
 void OrderBook::print() const
@@ -123,12 +143,12 @@ void OrderBook::print() const
     }
 }
 
-void OrderBook::printTrade(const OrderPtr &order1, const OrderPtr &order2, unsigned int trade_quantity)
+void OrderBook::printTrade(const Order &order1, const Order &order2, std::size_t trade_quantity)
 {
     std::cout << "TRADE";
-    std::cout << " " << order1->getOrderId();
+    std::cout << " " << OrderFactory::getOrderStrById(order1.getOrderId());
     std::cout << " " << std::to_string(trade_quantity);
-    std::cout << " " << order2->getOrderId();
+    std::cout << " " << OrderFactory::getOrderStrById(order2.getOrderId());
     std::cout << " " << std::to_string(trade_quantity);
     std::cout << std::endl;
 }

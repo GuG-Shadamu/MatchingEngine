@@ -2,31 +2,18 @@
  * @Author: Tairan Gao
  * @Date:   2023-09-01 13:06:57
  * @Last Modified by:   Tairan Gao
- * @Last Modified time: 2023-09-01 14:56:50
+ * @Last Modified time: 2023-09-05 02:16:28
  */
 
 #include "SkipList.hpp"
+#include "SkipListNode.hpp"
 
 const float P = 0.5;
-
-std::string SkipList::SkipListNode::summarize() const
-{
-    std::string summary;
-    summary += std::to_string(price_) + " ";
-    unsigned int total_quantity = 0;
-
-    for (const auto &order : innerList_)
-    {
-        total_quantity += order->getQuantity();
-    }
-    summary += std::to_string(total_quantity);
-    return summary;
-}
 
 SkipList::SkipList(bool isAscending)
         : isAscending_(isAscending), size_(0), level_(1), level_distribution(P)
 {
-    head_ = new SkipListNode();
+    head_ = factory_.createNode();
     std::random_device rd;
     rng.seed(rd());
 
@@ -34,20 +21,9 @@ SkipList::SkipList(bool isAscending)
     std::fill(head_->backward_.begin(), head_->backward_.end(), nullptr);
 }
 
-SkipList::~SkipList()
+SkipListNode *SkipList::insertPrice(int price)
 {
-    SkipListNode *current = head_;
-    while (current)
-    {
-        SkipListNode *next = current->forward_[0];
-        delete current;
-        current = next;
-    }
-}
-
-void SkipList::insert(int price)
-{
-    auto *new_node = new SkipListNode(price);
+    SkipListNode *new_node = factory_.createNode(price);
     SkipListNode *current_node = head_;
     std::array<SkipListNode *, MAX_LEVEL> before{};
     std::array<SkipListNode *, MAX_LEVEL> after{};
@@ -113,19 +89,18 @@ void SkipList::insert(int price)
         }
         new_node->backward_[i] = before[i];
     }
-
     size_++;
-    price_to_linked_list_map_[price] = new_node;
+    return new_node;
 }
 
-void SkipList::remove(int price)
+void SkipList::removePrice(int price)
 {
-    if (price_to_linked_list_map_.find(price) == price_to_linked_list_map_.end())
+    if (!factory_.hasPrice(price))
     {
         throw std::runtime_error("Price not found");
     }
 
-    SkipListNode *current_node = price_to_linked_list_map_[price];
+    SkipListNode *current_node = factory_.getNodeByPrice(price);
     size_t node_level = current_node->forward_.size();
 
     for (int i = 0; i < node_level; ++i)
@@ -140,34 +115,35 @@ void SkipList::remove(int price)
         }
     }
 
-    size_--;
-    price_to_linked_list_map_.erase(price);
-    delete current_node;
+    factory_.removeNodeByPrice(price);
 }
 
-void SkipList::insert_order(const OrderPtr& order)
+void SkipList::insertOrder(Order *order)
 {
     int price = order->getPrice();
     SkipListNode *node;
-    if (price_to_linked_list_map_.find(price) == price_to_linked_list_map_.end())
+
+    if (!factory_.hasPrice(price))
     {
-        insert(price);
+        node = insertPrice(price);
     }
-    node = price_to_linked_list_map_[price];
+    else
+    {
+        node = factory_.getNodeByPrice(price);
+    }
     node->innerList_.push_back(order);
     node->size_++;
     id_to_linked_list_itor_map_[order->getOrderId()] = std::prev(node->innerList_.end());
 }
-
-void SkipList::remove_order(OrderPtr &order)
+void SkipList::removeOrder(const Order &order)
 {
     // remove from Linked-List
-    auto itor = id_to_linked_list_itor_map_.find(order->getOrderId());
+    auto itor = id_to_linked_list_itor_map_.find(order.getOrderId());
     if (itor == id_to_linked_list_itor_map_.end())
     {
         throw std::runtime_error("Order not found");
     }
-    SkipListNode *node = price_to_linked_list_map_[order->getPrice()];
+    SkipListNode *node = factory_.getNodeByPrice(order.getPrice());
     node->innerList_.erase(itor->second);
     node->size_--;
     id_to_linked_list_itor_map_.erase(itor);
@@ -175,29 +151,9 @@ void SkipList::remove_order(OrderPtr &order)
     // remove the linked-list node if no order left
     if (node->size_ == 0)
     {
-        int price = order->getPrice();
-        remove(price);
+        int price = order.getPrice();
+        removePrice(price);
     }
-}
-
-SkipList::SkipListNode *SkipList::front() const
-{
-    if (empty())
-    {
-        return nullptr;
-    }
-
-    return head_->forward_[0];
-}
-
-std::list<OrderPtr> &SkipList::operator[](int price) const
-{
-    auto it = price_to_linked_list_map_.find(price);
-    if (it != price_to_linked_list_map_.end())
-    {
-        return it->second->innerList_;
-    }
-    throw std::out_of_range("Price not found in SkipList");
 }
 
 std::vector<std::string> SkipList::summarize() const
@@ -214,15 +170,4 @@ std::vector<std::string> SkipList::summarize() const
         skipListNode = skipListNode->forward_[0];
     }
     return summary;
-}
-
-void SkipList::pop_top_order()
-{
-    if (empty())
-    {
-        throw std::runtime_error("Empty list");
-    }
-
-    OrderPtr &top_order = get_top_order();
-    remove_order(top_order);
 }

@@ -2,7 +2,7 @@
  * @Author: Tairan Gao
  * @Date:   2023-08-29 18:58:41
  * @Last Modified by:   Tairan Gao
- * @Last Modified time: 2023-09-01 16:53:38
+ * @Last Modified time: 2023-09-04 16:20:06
  */
 
 #ifndef ORDERFACTORY_H
@@ -10,48 +10,31 @@
 
 #include <memory>
 #include <string>
+#include <stack>
 #include <unordered_map>
 
 #include "Order.hpp"
 
 class OrderFactory
 {
-public:
-    using OrderPtr = std::shared_ptr<Order>;
-
-    template <class... Args>
-    static OrderPtr createOrder(Args &&...args)
-    {
-        return std::make_shared<Order>(std::forward<Args>(args)...);
-    }
-
-    static void addOrder(const OrderPtr& order)
-    {
-        orderIDMap_[order->getOrderId()] = order;
-    }
-
-    static void removeOrder(const std::string &orderID)
-    {
-        orderIDMap_.erase(orderID);
-    }
-
-    static bool isOrderExist(const std::string &orderID)
-    {
-        return orderIDMap_.find(orderID) != orderIDMap_.end();
-    }
-
-    static OrderPtr getOrderById(const std::string &orderID)
-    {
-        return orderIDMap_[orderID];
-    }
-    // make OrderFactory cannot be copied, just for good practice
-    OrderFactory(const OrderFactory &) = delete;
-    OrderFactory &operator=(const OrderFactory &) = delete;
 
 private:
     // static inline: only one instance of this variable shared across all instances
     // of OrderFactory for the same template arguments.
-    static std::unordered_map<std::string, OrderPtr> orderIDMap_;
+    static std::hash<std::string> str_hash_;
+    static std::unordered_map<std::size_t, std::unique_ptr<Order>> orderMap_;
+    static std::unordered_map<std::size_t, std::string> orderIdMap_;
+    static std::stack<std::unique_ptr<Order>> orderPool_;
+
+public:
+    static Order *createOrder(const std::string &order_id_str, int price, std::size_t quantity, OrderSide side, OrderType type);
+    static void removeOrder(const Order &order);
+    static Order *getOrderById(const std::string &order_id);
+    static std::string getOrderStrById(const std::size_t order_id) { return orderIdMap_[order_id]; }
+
+    // make OrderFactory cannot be copied, just for good practice
+    OrderFactory(const OrderFactory &) = delete;
+    OrderFactory &operator=(const OrderFactory &) = delete;
 };
 
 #endif // ORDERFACTORY_H
